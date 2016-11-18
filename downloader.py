@@ -39,7 +39,8 @@ class Downloader:
         self.username = None
         self.accessKey = None
 
-    def download_file(self, url, *, saved_path=None, filename=None):
+    @staticmethod
+    def _download_file(url, saved_path=None, filename=None):
         if filename is None:
             # url : <scheme>://<netloc>/<path>?<query>#<fragment>
             scheme, netloc, path, query, fragment = urlsplit(url)
@@ -48,13 +49,13 @@ class Downloader:
         if saved_path:
             filename = os.path.join(saved_path, filename)
 
-        r = requests.get(url, stream=True)  # make stream True to save memory space
+        r = requests.get(url, stream=True, timeout=10)  # make stream True to save memory space
 
         try:
             total_size = r.headers['Content-Length']
             print('Downloading from: {} Size(Bytes): {}'.format(url, total_size))
         except KeyError:
-            print('Cannot find size information')
+            print('Cannot find size information for {}'.format(url))
 
         with open(filename, 'wb') as fp:
             for chunk in r.iter_content(chunk_size=1024):
@@ -63,12 +64,14 @@ class Downloader:
 
         return filename
 
-    def mkdir_wnid(self, wnid):
+    @staticmethod
+    def mkdir_wnid(wnid):
         if not os.path.exists(wnid):
             os.mkdir(wnid)
         return os.path.abspath(wnid)
 
-    def extract_tar(self, filename):
+    @staticmethod
+    def extract_tar(filename):
         tar = tarfile.open(filename)
         tar.extractall()
         tar.close()
@@ -77,10 +80,13 @@ class Downloader:
         download_url = 'http://www.image-net.org/download/synset?wnid={}&username={}&accesskey={}&release=latest&src=stanford'.format(
             wnid, self.username, self.accessKey)
 
+        wnid_path = self.mkdir_wnid(wnid)
         try:
-            download_file = self.download_file(download_url, saved_path=self.mkdir_wnid(wnid), filename=(wnid + '.tar'))
-        except:
-            print('fail to download file from {}'.format(download_url))
+            download_file = self._download_file(download_url, saved_path=wnid_path, filename=(wnid + '.tar'))
+        except requests.exceptions.Timeout:
+            print('fail to download file from {} for {}'.format(download_url, wnid))
+            os.rmdir(wnid_path)
+            return None
 
         base_dir = os.getcwd()
         os.chdir(wnid)
@@ -90,17 +96,12 @@ class Downloader:
         os.chdir(base_dir)
         return wnid
 
-    def get_hyponym_list(self, wnid):
-        url = 'http://www.image-net.org/api/text/wordnet.structure.hyponym?wnid={}&full=1'.format(wnid)
-        r = requests.get(url)
-        wnid_list = r.text.split('\r\n')
-        hyponym_list = list()
-        for wnid in wnid_list[1:]:
-            if wnid != '':
-                hyponym_list.append(wnid[1:])
-        return hyponym_list
-
-    def download_synset(self, wnid):
+    def download_synsets(self, wnid_list):
+        '''
+        Given a list of wnid, download the images for the corresponding synsets
+        :param wnid_list: the wnids for all synsets that need to be downloaded
+        '''
+        # get user info
         info = read_info()
         if info is not None:
             self.username, self.accessKey = info
@@ -110,8 +111,6 @@ class Downloader:
             self.accessKey = input('Enter your accessKey : ')
             if self.username and self.accessKey:
                 save_info(self.username, self.accessKey)
-
-        wnid_list = self.get_hyponym_list(wnid)
 
         workers = min(self.max_workers, len(wnid_list))
         with futures.ThreadPoolExecutor(workers) as executor:
@@ -123,9 +122,34 @@ class Downloader:
 
             for future in futures.as_completed(tasks):
                 res = future.result()
-                print('{} has been downloaded'.format(wnid))
+                if res:
+                    print('{} has been downloaded'.format(res))
+
+    @staticmethod
+    def _get_hyponym_list(wnid):
+        url = 'http://www.image-net.org/api/text/wordnet.structure.hyponym?wnid={}&full=1'.format(wnid)
+        r = requests.get(url, timeout=5)
+        wnid_list = r.text.split('\r\n')
+        hyponym_list = list()
+        for wnid in wnid_list[1:]:
+            if wnid != '':
+                hyponym_list.append(wnid[1:])
+        return hyponym_list
+
+    def download_all_hyponym(self, wnid):
+        '''
+        Given a wnid of a synset, download all the hyponyms for this synset.
+        :param wnid: the wnid of the parent synset
+        '''
+        try:
+            hyponym_list = self._get_hyponym_list(wnid)
+        except requests.exceptions.Timeout:
+            print('Time Out when trying to get hyponym list for wnid{}. Check connection'.format(wnid))
+            return
+
+        self.download_synsets(hyponym_list)
 
 
 if __name__ == '__main__':
     downloader = Downloader()
-    downloader.download_synset('n07707451')
+    downloader.download_all_hyponym('n07707451')
