@@ -36,7 +36,7 @@ def read_info():
 
 class Downloader:
     def __init__(self, download_path=None):
-        self.max_workers = 5
+        self.max_workers = 2
         self.username = None
         self.accessKey = None
         self.success_count = 0
@@ -72,7 +72,9 @@ class Downloader:
     def _mkdir_synset(wnid):
         if not os.path.exists(wnid):
             os.mkdir(wnid)
-        return os.path.abspath(wnid)
+            return os.path.abspath(wnid)
+        else:
+            return None
 
     @staticmethod
     def _extract_tar(filename):
@@ -114,6 +116,10 @@ class Downloader:
             wnid_name = os.path.join(self.download_path, wnid_name)
 
         wnid_path = self._mkdir_synset(wnid_name)
+        if wnid_path is None:
+            print('{} has existed'.format(wnid))
+            return None
+
         try:
             download_file = self._download_file(download_url, saved_path=wnid_path, filename=(wnid + '.tar'))
         except (requests.exceptions.Timeout, TimeoutError):
@@ -189,5 +195,11 @@ class Downloader:
 
 
 if __name__ == '__main__':
-    downloader = Downloader(download_path='/Users/cjc/data/fruit')
-    downloader.download_first_level_hyponym('n07705931')
+    pass
+    # downloader = Downloader(download_path='/Users/cjc/data/fruit')
+    # downloader.download_synsets(['n07739506', 'n07745940', 'n07743544',
+                                 # 'n07753592', 'n07764155', 'n07763629', 'n07751004', 'n07757511'])
+
+
+
+
