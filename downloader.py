@@ -3,6 +3,7 @@ from urllib.parse import urlsplit
 import json
 from concurrent import futures
 import tarfile
+import shutil
 
 import requests
 
@@ -38,6 +39,8 @@ class Downloader:
         self.max_workers = 10
         self.username = None
         self.accessKey = None
+        self.success_count = 0
+        self.failure_count = 0
 
     @staticmethod
     def _download_file(url, saved_path=None, filename=None):
@@ -49,7 +52,7 @@ class Downloader:
         if saved_path:
             filename = os.path.join(saved_path, filename)
 
-        r = requests.get(url, stream=True, timeout=10)  # make stream True to save memory space
+        r = requests.get(url, stream=True, timeout=100)  # make stream True to save memory space
 
         try:
             total_size = r.headers['Content-Length']
@@ -65,7 +68,7 @@ class Downloader:
         return filename
 
     @staticmethod
-    def mkdir_wnid(wnid):
+    def mkdir_synset(wnid):
         if not os.path.exists(wnid):
             os.mkdir(wnid)
         return os.path.abspath(wnid)
@@ -80,27 +83,39 @@ class Downloader:
         download_url = 'http://www.image-net.org/download/synset?wnid={}&username={}&accesskey={}&release=latest&src=stanford'.format(
             wnid, self.username, self.accessKey)
 
-        wnid_path = self.mkdir_wnid(wnid)
+        # get the corresponding name for the specified wnid
+        wnid_name = self._get_wnid_text(wnid)
+
+        wnid_path = self.mkdir_synset(wnid_name)
         try:
             download_file = self._download_file(download_url, saved_path=wnid_path, filename=(wnid + '.tar'))
         except requests.exceptions.Timeout:
             print('fail to download file from {} for {}'.format(download_url, wnid))
-            os.rmdir(wnid_path)
+            shutil.rmtree(wnid_path)
             return None
 
         base_dir = os.getcwd()
-        os.chdir(wnid)
+        os.chdir(wnid_name)
         # extract the tar file and then remove it
-        self.extract_tar(download_file)
+        try:
+            self.extract_tar(download_file)
+        except tarfile.ReadError:
+            os.chdir(base_dir)
+            print('fail to open {}, return to the original path'.format(download_file))
+            return None
+
         os.remove(download_file)
         os.chdir(base_dir)
-        return wnid
+        return wnid_name
 
     def download_synsets(self, wnid_list):
         '''
         Given a list of wnid, download the images for the corresponding synsets
         :param wnid_list: the wnids for all synsets that need to be downloaded
         '''
+        self.failure_count = 0
+        self.success_count = 0
+
         # get user info
         info = read_info()
         if info is not None:
@@ -123,18 +138,31 @@ class Downloader:
             for future in futures.as_completed(tasks):
                 res = future.result()
                 if res:
+                    self.success_count += 1
                     print('{} has been downloaded'.format(res))
+                else:
+                    self.failure_count += 1
+
+            print('Misson Completed. {} success, {} failure'.format(self.success_count, self.failure_count))
 
     @staticmethod
     def _get_hyponym_list(wnid):
-        url = 'http://www.image-net.org/api/text/wordnet.structure.hyponym?wnid={}&full=1'.format(wnid)
-        r = requests.get(url, timeout=5)
+        url = 'http://www.image-net.org/api/text/wordnet.structure.hyponym?wnid={}'.format(wnid)
+        r = requests.get(url, timeout=50)
         wnid_list = r.text.split('\r\n')
         hyponym_list = list()
         for wnid in wnid_list[1:]:
             if wnid != '':
                 hyponym_list.append(wnid[1:])
         return hyponym_list
+
+    @staticmethod
+    def _get_wnid_text(wnid):
+        url = 'http://www.image-net.org/api/text/wordnet.synset.getwords?wnid={}'.format(wnid)
+        r = requests.get(url, timeout=100)
+        words = r.text.split('\n')
+        result = 'n_' + '_'.join(words)
+        return result[:-1]
 
     def download_all_hyponym(self, wnid):
         '''
@@ -152,4 +180,4 @@ class Downloader:
 
 if __name__ == '__main__':
     downloader = Downloader()
-    downloader.download_all_hyponym('n07707451')
+    downloader.download_all_hyponym('n07705931')
