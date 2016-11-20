@@ -35,15 +35,13 @@ def read_info():
 
 
 class Downloader:
-    def __init__(self, main_path=None):
+    def __init__(self, download_path=None):
         self.max_workers = 5
         self.username = None
         self.accessKey = None
         self.success_count = 0
         self.failure_count = 0
-        self.main_path = main_path
-        if self.main_path:
-            os.chdir(self.main_path)
+        self.download_path = download_path
 
     @staticmethod
     def _download_file(url, saved_path=None, filename=None):
@@ -71,16 +69,35 @@ class Downloader:
         return filename
 
     @staticmethod
-    def mkdir_synset(wnid):
+    def _mkdir_synset(wnid):
         if not os.path.exists(wnid):
             os.mkdir(wnid)
         return os.path.abspath(wnid)
 
     @staticmethod
-    def extract_tar(filename):
+    def _extract_tar(filename):
         tar = tarfile.open(filename)
         tar.extractall()
         tar.close()
+
+    @staticmethod
+    def _get_hyponym_list(wnid):
+        url = 'http://www.image-net.org/api/text/wordnet.structure.hyponym?wnid={}'.format(wnid)
+        r = requests.get(url, timeout=50)
+        wnid_list = r.text.split('\r\n')
+        hyponym_list = list()
+        for wnid in wnid_list[1:]:
+            if wnid != '':
+                hyponym_list.append(wnid[1:])
+        return hyponym_list
+
+    @staticmethod
+    def _get_wnid_text(wnid):
+        url = 'http://www.image-net.org/api/text/wordnet.synset.getwords?wnid={}'.format(wnid)
+        r = requests.get(url, timeout=100)
+        words = r.text.split('\n')
+        result = 'n_' + '_'.join(words)
+        return result[:-1]
 
     def download_original_image(self, wnid):
         download_url = 'http://www.image-net.org/download/synset?wnid={}&username={}&accesskey={}&release=latest&src=stanford'.format(
@@ -93,7 +110,10 @@ class Downloader:
             print('Timeout when trying to get the name for {}'.format(wnid))
             return None
 
-        wnid_path = self.mkdir_synset(wnid_name)
+        if self.download_path:
+            wnid_name = os.path.join(self.download_path, wnid_name)
+
+        wnid_path = self._mkdir_synset(wnid_name)
         try:
             download_file = self._download_file(download_url, saved_path=wnid_path, filename=(wnid + '.tar'))
         except (requests.exceptions.Timeout, TimeoutError):
@@ -105,7 +125,7 @@ class Downloader:
         os.chdir(wnid_name)
         # extract the tar file and then remove it
         try:
-            self.extract_tar(download_file)
+            self._extract_tar(download_file)
         except tarfile.ReadError:
             os.chdir(base_dir)
             print('fail to open {}, return to the original path'.format(download_file))
@@ -122,6 +142,7 @@ class Downloader:
         '''
         self.failure_count = 0
         self.success_count = 0
+        original_path = os.getcwd()
 
         # get user info
         info = read_info()
@@ -150,26 +171,8 @@ class Downloader:
                 else:  # res is None, this task failed
                     self.failure_count += 1
 
-            print('Misson Completed. {} success, {} failure'.format(self.success_count, self.failure_count))
-
-    @staticmethod
-    def _get_hyponym_list(wnid):
-        url = 'http://www.image-net.org/api/text/wordnet.structure.hyponym?wnid={}'.format(wnid)
-        r = requests.get(url, timeout=50)
-        wnid_list = r.text.split('\r\n')
-        hyponym_list = list()
-        for wnid in wnid_list[1:]:
-            if wnid != '':
-                hyponym_list.append(wnid[1:])
-        return hyponym_list
-
-    @staticmethod
-    def _get_wnid_text(wnid):
-        url = 'http://www.image-net.org/api/text/wordnet.synset.getwords?wnid={}'.format(wnid)
-        r = requests.get(url, timeout=100)
-        words = r.text.split('\n')
-        result = 'n_' + '_'.join(words)
-        return result[:-1]
+        print('Misson Completed. {} success, {} failure'.format(self.success_count, self.failure_count))
+        os.chdir(original_path)
 
     def download_first_level_hyponym(self, wnid):
         '''
@@ -186,5 +189,5 @@ class Downloader:
 
 
 if __name__ == '__main__':
-    downloader = Downloader()
+    downloader = Downloader(download_path='/Users/cjc/data/fruit')
     downloader.download_first_level_hyponym('n07705931')
