@@ -35,12 +35,15 @@ def read_info():
 
 
 class Downloader:
-    def __init__(self):
-        self.max_workers = 10
+    def __init__(self, main_path=None):
+        self.max_workers = 5
         self.username = None
         self.accessKey = None
         self.success_count = 0
         self.failure_count = 0
+        self.main_path = main_path
+        if self.main_path:
+            os.chdir(self.main_path)
 
     @staticmethod
     def _download_file(url, saved_path=None, filename=None):
@@ -84,12 +87,16 @@ class Downloader:
             wnid, self.username, self.accessKey)
 
         # get the corresponding name for the specified wnid
-        wnid_name = self._get_wnid_text(wnid)
+        try:
+            wnid_name = self._get_wnid_text(wnid)
+        except (requests.exceptions.Timeout, TimeoutError):
+            print('Timeout when trying to get the name for {}'.format(wnid))
+            return None
 
         wnid_path = self.mkdir_synset(wnid_name)
         try:
             download_file = self._download_file(download_url, saved_path=wnid_path, filename=(wnid + '.tar'))
-        except requests.exceptions.Timeout:
+        except (requests.exceptions.Timeout, TimeoutError):
             print('fail to download file from {} for {}'.format(download_url, wnid))
             shutil.rmtree(wnid_path)
             return None
@@ -140,7 +147,7 @@ class Downloader:
                 if res:
                     self.success_count += 1
                     print('{} has been downloaded'.format(res))
-                else:
+                else:  # res is None, this task failed
                     self.failure_count += 1
 
             print('Misson Completed. {} success, {} failure'.format(self.success_count, self.failure_count))
@@ -164,15 +171,15 @@ class Downloader:
         result = 'n_' + '_'.join(words)
         return result[:-1]
 
-    def download_all_hyponym(self, wnid):
+    def download_first_level_hyponym(self, wnid):
         '''
         Given a wnid of a synset, download all the hyponyms for this synset.
         :param wnid: the wnid of the parent synset
         '''
         try:
             hyponym_list = self._get_hyponym_list(wnid)
-        except requests.exceptions.Timeout:
-            print('Time Out when trying to get hyponym list for wnid{}. Check connection'.format(wnid))
+        except (requests.exceptions.Timeout, TimeoutError):
+            print('Time Out when trying to get hyponym list for wnid {}. Check connection'.format(wnid))
             return
 
         self.download_synsets(hyponym_list)
@@ -180,4 +187,4 @@ class Downloader:
 
 if __name__ == '__main__':
     downloader = Downloader()
-    downloader.download_all_hyponym('n07705931')
+    downloader.download_first_level_hyponym('n07705931')
